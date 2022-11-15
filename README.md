@@ -1,8 +1,8 @@
-# Template for CUDA Projects
+# Monte Carlo simulation using NVIDIA's CURAND library for random number generation
 
 ## Description
 
-A trivial template project that can be used as a starting point to create new CUDA projects. Most of configurations are from CUDA Samples repository.
+Monte Carlo simulation project by using NVIDIA's CURAND library for random number generation. Cover CUDA aspects: constant memory, random number generation, kernel timing, minimising device memory bandwidth requirements.
 
 ## Key Concepts
 
@@ -44,7 +44,6 @@ To build/examine all the samples at once, the complete solution files should be 
 ### Linux
 The Linux samples are built using makefiles. To use the makefiles, change the current directory to the sample directory you wish to build, and run make:
 ```
-$ cd <sample_dir>
 $ make
 ```
 The samples makefiles can take advantage of certain options:
@@ -68,3 +67,4 @@ The samples makefiles can take advantage of certain options:
 
 ## References (for more details)
 
+[1] CUDA C++ Programming Guide, https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html

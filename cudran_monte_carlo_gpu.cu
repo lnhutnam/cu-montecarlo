@@ -124,8 +124,9 @@ int main(int argc, const char **argv){
   float  *h_v, *d_v, *d_z;
   double  sum1, sum2;
 
-  // initialise card
+  // Initialise card
   findCudaDevice(argc, argv);
+  printDeviceInfo();
 
   // initialise CUDA timing
   float milli;
@@ -133,13 +134,13 @@ int main(int argc, const char **argv){
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
 
-  // allocate memory on host and device
+  // Allocate memory on host and device
   h_v = (float *)malloc(sizeof(float)*NPATH);
 
   checkCudaErrors( cudaMalloc((void **)&d_v, sizeof(float)*NPATH) );
   checkCudaErrors( cudaMalloc((void **)&d_z, sizeof(float)*2*h_N*NPATH) );
 
-  // define constants and transfer to GPU
+  // Define constants and transfer to GPU
   h_T     = 1.0f;
   h_r     = 0.05f;
   h_sigma = 0.1f;
@@ -159,7 +160,7 @@ int main(int argc, const char **argv){
   checkCudaErrors( cudaMemcpyToSymbol(con1, &h_con1, sizeof(h_con1)) );
   checkCudaErrors( cudaMemcpyToSymbol(con2, &h_con2, sizeof(h_con2)) );
 
-  // random number generation
+  // Random number generation
   cudaEventRecord(start);
 
   curandGenerator_t gen;
@@ -173,7 +174,7 @@ int main(int argc, const char **argv){
 
   printf("CURAND normal RNG  execution time (ms): %f,  samples/sec: %e \n", milli, 2.0*h_N*NPATH/(0.001*milli));
 
-  // execute kernel and time it
+  // Execute kernel and time it
   cudaEventRecord(start);
 
   pathcalcV2<<<NPATH/64, 64>>>(d_z, d_v);
@@ -185,10 +186,10 @@ int main(int argc, const char **argv){
 
   printf("Monte Carlo kernel execution time (ms): %f \n",milli);
 
-  // copy back results
+  // Copy back results
   checkCudaErrors( cudaMemcpy(h_v, d_v, sizeof(float)*NPATH, cudaMemcpyDeviceToHost) );
 
-  // compute average
+  // Compute average
   sum1 = 0.0;
   sum2 = 0.0;
   for (int i=0; i<NPATH; i++) {
