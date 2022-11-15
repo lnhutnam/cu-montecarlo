@@ -6,7 +6,7 @@ Monte Carlo simulation project by using NVIDIA's CURAND library for random numbe
 
 ## Key Concepts
 
-Device Memory Allocation
+Constant memory; Random number generation; Kernel timing, Minimising device memory bandwidth requirements.
 
 ## Supported SM Architectures
 
