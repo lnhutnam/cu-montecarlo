@@ -320,7 +320,7 @@ else
 	@echo "Sample is ready - all dependencies have been met"
 endif
 
-cudran_monte_carlo_gpu.o:cudran_monte_carlo_gpu.cu
+cudran_monte_carlo_gpu.o:cudran_square_poly_gpu.cu
 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
 # cudran_monte_carlo_cpu.o:cudran_monte_carlo_cpu.cpp
