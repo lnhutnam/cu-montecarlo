@@ -1,34 +1,4 @@
-/* Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *  * Neither the name of NVIDIA CORPORATION nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
-/* Template project which demonstrates the basics on how to setup a project
- * example application.
- * Host code.
- */
+// GPU version of Monte Carlo algorithm using NVIDIA's CURAND library
 
 // includes, system
 #include <stdlib.h>
@@ -37,150 +7,206 @@
 #include <math.h>
 
 // includes CUDA
-#include <cuda_runtime.h>
+#include <cuda.h>
+#include <curand.h>
 
 // includes, project
-#include <helper_cuda.h>
-#include <helper_functions.h> // helper functions for SDK examples
+#include <helper_cuda.h>      // helper functions for cuda
 
-////////////////////////////////////////////////////////////////////////////////
-// declaration, forward
-void runTest(int argc, char **argv);
-
-extern "C" void computeGold(float *reference, float *idata,
-                            const unsigned int len);
-
-////////////////////////////////////////////////////////////////////////////////
-//! Simple test kernel for device functionality
-//! @param g_idata  input data in global memory
-//! @param g_odata  output data in global memory
-////////////////////////////////////////////////////////////////////////////////
-__global__ void testKernel(float *g_idata, float *g_odata) {
-  // shared memory
-  // the size is determined by the host application
-  extern __shared__ float sdata[];
-
-  // access thread id
-  const unsigned int tid = threadIdx.x;
-  // access number of threads in this block
-  const unsigned int num_threads = blockDim.x;
-
-  // read in input data from global memory
-  sdata[tid] = g_idata[tid];
-  __syncthreads();
-
-  // perform some computations
-  sdata[tid] = (float)num_threads * sdata[tid];
-  __syncthreads();
-
-  // write data to global memory
-  g_odata[tid] = sdata[tid];
-}
+#define CHECK(call)                                          \
+  {                                                          \
+    const cudaError_t error = call;                          \
+    if (error != cudaSuccess)                                \
+    {                                                        \
+      fprintf(stderr, "Error: %s:%d, ", __FILE__, __LINE__); \
+      fprintf(stderr, "code: %d, reason: %s\n", error,       \
+              cudaGetErrorString(error));                    \
+      exit(EXIT_FAILURE);                                    \
+    }                                                        \
+  }
 
 __global__ void helloFromGPU()
 {
-    printf("Hello from GPU, threadId %d!\n", threadIdx.x);
-    printf("Goodbye from GPU, threadId %d!\n", threadIdx.x);
+  printf("Hello from GPU, threadId %d!\n", threadIdx.x);
+  printf("Goodbye from GPU, threadId %d!\n", threadIdx.x);
 }
 
 void printDeviceInfo()
 {
-    cudaDeviceProp devProv;
-    cudaGetDeviceProperties(&devProv, 0);
-    printf("**********GPU info**********\n");
-    printf("Name: %s\n", devProv.name);
-    printf("Compute capability: %d.%d\n", devProv.major, devProv.minor);
-    printf("GMEM: %zu byte\n", devProv.totalGlobalMem);
-    printf("****************************\n");
+  cudaDeviceProp devProv;
+  cudaGetDeviceProperties(&devProv, 0);
+  printf("**********GPU info**********\n");
+  printf("Name: %s\n", devProv.name);
+  printf("Compute capability: %d.%d\n", devProv.major, devProv.minor);
+  printf("GMEM: %zu byte\n", devProv.totalGlobalMem);
+  printf("****************************\n");
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Program main
-////////////////////////////////////////////////////////////////////////////////
-int main(int argc, char **argv) { runTest(argc, argv); }
+// CUDA global constants
+__constant__ int N;
+__constant__ float T, r, sigma, rho, alpha, dt, con1, con2;
 
-////////////////////////////////////////////////////////////////////////////////
-//! Run a simple test for CUDA
-////////////////////////////////////////////////////////////////////////////////
-void runTest(int argc, char **argv) {
-  bool bTestResult = true;
+// Kernel routine
+__global__ void pathcalcV1(float *d_z, float *d_v)
+{
+  float s1, s2, y1, y2, payoff;
 
-  printf("%s Starting...\n\n", argv[0]);
+  int i = threadIdx.x + 2 * N * blockIdx.x * blockDim.x;
 
-  // use command-line specified CUDA device, otherwise use device with highest
-  // Gflops/s
-  int devID = findCudaDevice(argc, (const char **)argv);
+  // path calculation
+  s1 = 1.0f;
+  s2 = 1.0f;
 
-  printf("Hello from CPU!\n");
+  for (int n = 0; n < N; n++)
+  {
+    y1 = d_z[i];
 
-  printDeviceInfo();
+    i += blockDim.x; // shift pointer to next element
 
-  helloFromGPU<<<1, 64>>>(); // 1 group of 64 threads do this function in parallel
+    y2 = rho * y1 + alpha * d_z[i];
 
-  StopWatchInterface *timer = 0;
-  sdkCreateTimer(&timer);
-  sdkStartTimer(&timer);
+    i += blockDim.x; // shift pointer to next element
 
-  unsigned int num_threads = 32;
-  unsigned int mem_size = sizeof(float) * num_threads;
-
-  // allocate host memory
-  float *h_idata = (float *)malloc(mem_size);
-
-  // initalize the memory
-  for (unsigned int i = 0; i < num_threads; ++i) {
-    h_idata[i] = (float)i;
+    s1 = s1 * (con1 + con2 * y1);
+    s2 = s2 * (con1 + con2 * y2);
   }
 
-  // allocate device memory
-  float *d_idata;
-  checkCudaErrors(cudaMalloc((void **)&d_idata, mem_size));
-  // copy host memory to device
-  checkCudaErrors(cudaMemcpy(d_idata, h_idata, mem_size, cudaMemcpyHostToDevice));
+  // put payoff value into device array
+  payoff = 0.0f;
 
-  // allocate device memory for result
-  float *d_odata;
-  checkCudaErrors(cudaMalloc((void **)&d_odata, mem_size));
-
-  // setup execution parameters
-  dim3 grid(1, 1, 1);
-  dim3 threads(num_threads, 1, 1);
-
-  // execute the kernel
-  testKernel<<<grid, threads, mem_size>>>(d_idata, d_odata);
-
-  // check if kernel execution generated and error
-  getLastCudaError("Kernel execution failed");
-
-  // allocate mem for the result on host side
-  float *h_odata = (float *)malloc(mem_size);
-  // copy result from device to host
-  checkCudaErrors(cudaMemcpy(h_odata, d_odata, sizeof(float) * num_threads, cudaMemcpyDeviceToHost));
-
-  sdkStopTimer(&timer);
-  printf("Processing time: %f (ms)\n", sdkGetTimerValue(&timer));
-  sdkDeleteTimer(&timer);
-
-  // compute reference solution
-  float *reference = (float *)malloc(mem_size);
-  computeGold(reference, h_idata, num_threads);
-
-  // check result
-  if (checkCmdLineFlag(argc, (const char **)argv, "regression")) {
-    // write file for regression test
-    sdkWriteFile("./data/regression.dat", h_odata, num_threads, 0.0f, false);
-  } else {
-    // custom output handling when no regression test running
-    // in this case check if the result is equivalent to the expected solution
-    bTestResult = compareData(reference, h_odata, num_threads, 0.0f, 0.0f);
+  if (fabs(s1 - 1.0f) < 0.1f && fabs(s2 - 1.0f) < 0.1f)
+  {
+    payoff = exp(-r * T);
   }
 
-  // cleanup memory
-  free(h_idata);
-  free(h_odata);
-  free(reference);
-  checkCudaErrors(cudaFree(d_idata));
-  checkCudaErrors(cudaFree(d_odata));
+  d_v[threadIdx.x + blockIdx.x * blockDim.x] = payoff;
+}
 
-  exit(bTestResult ? EXIT_SUCCESS : EXIT_FAILURE);
+__global__ void pathcalcV2(float *d_z, float *d_v)
+{
+  float s1, s2, y1, y2, payoff;
+
+  int i = 2 * N * threadIdx.x + 2 * N * blockIdx.x * blockDim.x;
+
+  // path calculation
+  s1 = 1.0f;
+  s2 = 1.0f;
+
+  for (int n = 0; n < N; n++)
+  {
+    y1 = d_z[i];
+
+    i += 1;
+
+    y2 = rho * y1 + alpha * d_z[i];
+
+    i += 1;
+
+    s1 = s1 * (con1 + con2 * y1);
+    s2 = s2 * (con1 + con2 * y2);
+  }
+
+  // put payoff value into device array
+  payoff = 0.0f;
+
+  if (fabs(s1 - 1.0f) < 0.1f && fabs(s2 - 1.0f) < 0.1f)
+  {
+    payoff = exp(-r * T);
+  }
+
+  d_v[threadIdx.x + blockIdx.x * blockDim.x] = payoff;
+}
+
+int main(int argc, const char **argv){
+
+  int     NPATH=960000, h_N=100;
+  float   h_T, h_r, h_sigma, h_rho, h_alpha, h_dt, h_con1, h_con2;
+  float  *h_v, *d_v, *d_z;
+  double  sum1, sum2;
+
+  // initialise card
+  findCudaDevice(argc, argv);
+
+  // initialise CUDA timing
+  float milli;
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+
+  // allocate memory on host and device
+  h_v = (float *)malloc(sizeof(float)*NPATH);
+
+  checkCudaErrors( cudaMalloc((void **)&d_v, sizeof(float)*NPATH) );
+  checkCudaErrors( cudaMalloc((void **)&d_z, sizeof(float)*2*h_N*NPATH) );
+
+  // define constants and transfer to GPU
+  h_T     = 1.0f;
+  h_r     = 0.05f;
+  h_sigma = 0.1f;
+  h_rho   = 0.5f;
+  h_alpha = sqrt(1.0f-h_rho*h_rho);
+  h_dt    = 1.0f/h_N;
+  h_con1  = 1.0f + h_r*h_dt;
+  h_con2  = sqrt(h_dt)*h_sigma;
+
+  checkCudaErrors( cudaMemcpyToSymbol(N,    &h_N,    sizeof(h_N)) );
+  checkCudaErrors( cudaMemcpyToSymbol(T,    &h_T,    sizeof(h_T)) );
+  checkCudaErrors( cudaMemcpyToSymbol(r,    &h_r,    sizeof(h_r)) );
+  checkCudaErrors( cudaMemcpyToSymbol(sigma,&h_sigma,sizeof(h_sigma)) );
+  checkCudaErrors( cudaMemcpyToSymbol(rho,  &h_rho,  sizeof(h_rho)) );
+  checkCudaErrors( cudaMemcpyToSymbol(alpha,&h_alpha,sizeof(h_alpha)) );
+  checkCudaErrors( cudaMemcpyToSymbol(dt,   &h_dt,   sizeof(h_dt)) );
+  checkCudaErrors( cudaMemcpyToSymbol(con1, &h_con1, sizeof(h_con1)) );
+  checkCudaErrors( cudaMemcpyToSymbol(con2, &h_con2, sizeof(h_con2)) );
+
+  // random number generation
+  cudaEventRecord(start);
+
+  curandGenerator_t gen;
+  checkCudaErrors( curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT) );
+  checkCudaErrors( curandSetPseudoRandomGeneratorSeed(gen, 1234ULL) );
+  checkCudaErrors( curandGenerateNormal(gen, d_z, 2*h_N*NPATH, 0.0f, 1.0f) );
+
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&milli, start, stop);
+
+  printf("CURAND normal RNG  execution time (ms): %f,  samples/sec: %e \n", milli, 2.0*h_N*NPATH/(0.001*milli));
+
+  // execute kernel and time it
+  cudaEventRecord(start);
+
+  pathcalcV2<<<NPATH/64, 64>>>(d_z, d_v);
+  getLastCudaError("pathcalc execution failed\n");
+
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&milli, start, stop);
+
+  printf("Monte Carlo kernel execution time (ms): %f \n",milli);
+
+  // copy back results
+  checkCudaErrors( cudaMemcpy(h_v, d_v, sizeof(float)*NPATH, cudaMemcpyDeviceToHost) );
+
+  // compute average
+  sum1 = 0.0;
+  sum2 = 0.0;
+  for (int i=0; i<NPATH; i++) {
+    sum1 += h_v[i];
+    sum2 += h_v[i]*h_v[i];
+  }
+
+  printf("\nAverage value and standard deviation of error  = %13.8f %13.8f\n\n",
+	 sum1/NPATH, sqrt((sum2/NPATH - (sum1/NPATH)*(sum1/NPATH))/NPATH) );
+
+  // Tidy up library
+  checkCudaErrors( curandDestroyGenerator(gen) );
+
+  // Release memory and exit cleanly
+  free(h_v);
+  checkCudaErrors( cudaFree(d_v) );
+  checkCudaErrors( cudaFree(d_z) );
+
+  // CUDA exit -- needed to flush printf write buffer
+  cudaDeviceReset();
 }

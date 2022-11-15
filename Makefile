@@ -273,7 +273,7 @@ ALL_LDFLAGS += $(addprefix -Xlinker ,$(EXTRA_LDFLAGS))
 
 # Common includes and paths for CUDA
 INCLUDES  := -I./includes
-LIBRARIES :=
+LIBRARIES := -lcudart -lcurand
 
 ################################################################################
 
@@ -323,10 +323,10 @@ endif
 cudran_monte_carlo_gpu.o:cudran_monte_carlo_gpu.cu
 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-cudran_monte_carlo_cpu.o:cudran_monte_carlo_cpu.cpp
-	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
+# cudran_monte_carlo_cpu.o:cudran_monte_carlo_cpu.cpp
+# 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-cudran_monte_carlo: cudran_monte_carlo_gpu.o cudran_monte_carlo_cpu.o
+cudran_monte_carlo: cudran_monte_carlo_gpu.o
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(LIBRARIES)
 	$(EXEC) mkdir -p ./bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
 	$(EXEC) cp $@ ./bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
@@ -337,7 +337,7 @@ run: build
 testrun: build
 
 clean:
-	rm -f cudran_monte_carlo cudran_monte_carlo_gpu.o cudran_monte_carlo_cpu.o
+	rm -f cudran_monte_carlo cudran_monte_carlo_gpu.o
 	rm -rf /bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)/cudran_monte_carlo
 
 clobber: clean
